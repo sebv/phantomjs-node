@@ -1,15 +1,17 @@
-var require = function (file, cwd) {
+(function(){var require = function (file, cwd) {
     var resolved = require.resolve(file, cwd || '/');
     var mod = require.modules[resolved];
     if (!mod) throw new Error(
         'Failed to resolve module ' + file + ', tried ' + resolved
     );
-    var res = mod._cached ? mod._cached : mod();
+    var cached = require.cache[resolved];
+    var res = cached? cached.exports : mod();
     return res;
 }
 
 require.paths = [];
 require.modules = {};
+require.cache = {};
 require.extensions = [".js",".coffee"];
 
 require._core = {
@@ -23,36 +25,38 @@ require._core = {
 require.resolve = (function () {
     return function (x, cwd) {
         if (!cwd) cwd = '/';
-
+        
         if (require._core[x]) return x;
         var path = require.modules.path();
         cwd = path.resolve('/', cwd);
         var y = cwd || '/';
-
+        
         if (x.match(/^(?:\.\.?\/|\/)/)) {
-            var m = loadAsFileSync(path.resolve(y, x)) || loadAsDirectorySync(path.resolve(y, x));
+            var m = loadAsFileSync(path.resolve(y, x))
+                || loadAsDirectorySync(path.resolve(y, x));
             if (m) return m;
         }
-
+        
         var n = loadNodeModulesSync(x, y);
         if (n) return n;
-
+        
         throw new Error("Cannot find module '" + x + "'");
-
+        
         function loadAsFileSync (x) {
+            x = path.normalize(x);
             if (require.modules[x]) {
                 return x;
             }
-
+            
             for (var i = 0; i < require.extensions.length; i++) {
                 var ext = require.extensions[i];
                 if (require.modules[x + ext]) return x + ext;
             }
         }
-
+        
         function loadAsDirectorySync (x) {
             x = x.replace(/\/+$/, '');
-            var pkgfile = x + '/package.json';
+            var pkgfile = path.normalize(x + '/package.json');
             if (require.modules[pkgfile]) {
                 var pkg = require.modules[pkgfile]();
                 var b = pkg.browserify;
@@ -69,10 +73,10 @@ require.resolve = (function () {
                     if (m) return m;
                 }
             }
-
+            
             return loadAsFileSync(x + '/index');
         }
-
+        
         function loadNodeModulesSync (x, start) {
             var dirs = nodeModulesPathsSync(start);
             for (var i = 0; i < dirs.length; i++) {
@@ -82,23 +86,23 @@ require.resolve = (function () {
                 var n = loadAsDirectorySync(dir + '/' + x);
                 if (n) return n;
             }
-
+            
             var m = loadAsFileSync(x);
             if (m) return m;
         }
-
+        
         function nodeModulesPathsSync (start) {
             var parts;
             if (start === '/') parts = [ '' ];
             else parts = path.normalize(start).split('/');
-
+            
             var dirs = [];
             for (var i = parts.length - 1; i >= 0; i--) {
                 if (parts[i] === 'node_modules') continue;
                 var dir = parts.slice(0, i + 1).join('/') + '/node_modules';
                 dirs.push(dir);
             }
-
+            
             return dirs;
         }
     };
@@ -114,13 +118,13 @@ require.alias = function (from, to) {
         res = require.resolve(from, '/');
     }
     var basedir = path.dirname(res);
-
+    
     var keys = (Object.keys || function (obj) {
         var res = [];
-        for (var key in obj) res.push(key)
+        for (var key in obj) res.push(key);
         return res;
     })(require.modules);
-
+    
     for (var i = 0; i < keys.length; i++) {
         var key = keys[i];
         if (key.slice(0, basedir.length + 1) === basedir + '/') {
@@ -133,77 +137,48 @@ require.alias = function (from, to) {
     }
 };
 
-require.define = function (filename, fn) {
-    var dirname = require._core[filename]
-        ? ''
-        : require.modules.path().dirname(filename)
-    ;
-
-    var require_ = function (file) {
-        return require(file, dirname)
-    };
-    require_.resolve = function (name) {
-        return require.resolve(name, dirname);
-    };
-    require_.modules = require.modules;
-    require_.define = require.define;
-    var module_ = { exports : {} };
-
-    require.modules[filename] = function () {
-        require.modules[filename]._cached = module_.exports;
-        fn.call(
-            module_.exports,
-            require_,
-            module_,
-            module_.exports,
-            dirname,
-            filename
-        );
-        require.modules[filename]._cached = module_.exports;
-        return module_.exports;
-    };
-};
-
-if (typeof process === 'undefined') process = {};
-
-if (!process.nextTick) process.nextTick = (function () {
-    var queue = [];
-    var canPost = typeof window !== 'undefined'
-        && window.postMessage && window.addEventListener
-    ;
-
-    if (canPost) {
-        window.addEventListener('message', function (ev) {
-            if (ev.source === window && ev.data === 'browserify-tick') {
-                ev.stopPropagation();
-                if (queue.length > 0) {
-                    var fn = queue.shift();
-                    fn();
-                }
-            }
-        }, true);
-    }
-
-    return function (fn) {
-        if (canPost) {
-            queue.push(fn);
-            window.postMessage('browserify-tick', '*');
+(function () {
+    var process = {};
+    
+    require.define = function (filename, fn) {
+        if (require.modules.__browserify_process) {
+            process = require.modules.__browserify_process();
         }
-        else setTimeout(fn, 0);
+        
+        var dirname = require._core[filename]
+            ? ''
+            : require.modules.path().dirname(filename)
+        ;
+        
+        var require_ = function (file) {
+            return require(file, dirname);
+        };
+        require_.resolve = function (name) {
+            return require.resolve(name, dirname);
+        };
+        require_.modules = require.modules;
+        require_.define = require.define;
+        require_.cache = require.cache;
+        var module_ = { exports : {} };
+        
+        require.modules[filename] = function () {
+            require.cache[filename] = module_;
+            fn.call(
+                module_.exports,
+                require_,
+                module_,
+                module_.exports,
+                dirname,
+                filename,
+                process
+            );
+            return module_.exports;
+        };
     };
 })();
 
-if (!process.title) process.title = 'browser';
 
-if (!process.binding) process.binding = function (name) {
-    if (name === 'evals') return require('vm')
-    else throw new Error('No such module')
-};
-
-if (!process.cwd) process.cwd = function () { return '.' };
-
-require.define("path", function (require, module, exports, __dirname, __filename) {
-function filter (xs, fn) {
+require.define("path",function(require,module,exports,__dirname,__filename,process){function filter (xs, fn) {
     var res = [];
     for (var i = 0; i < xs.length; i++) {
         if (fn(xs[i], i, xs)) res.push(xs[i]);
@@ -293,7 +268,7 @@ path = normalizeArray(filter(path.split('/'), function(p) {
   if (path && trailingSlash) {
     path += '/';
   }
-
+  
   return (isAbsolute ? '/' : '') + path;
 };
 
@@ -337,24 +312,70 @@ exports.basename = function(path, ext) {
 exports.extname = function(path) {
   return splitPathRe.exec(path)[3] || '';
 };
-
 });
 
-require.define("/node_modules/dnode-protocol/package.json", function (require, module, exports, __dirname, __filename) {
-module.exports = {"main":"./index.js"}
+require.define("__browserify_process",function(require,module,exports,__dirname,__filename,process){var process = module.exports = {};
+
+process.nextTick = (function () {
+    var queue = [];
+    var canPost = typeof window !== 'undefined'
+        && window.postMessage && window.addEventListener
+    ;
+    
+    if (canPost) {
+        window.addEventListener('message', function (ev) {
+            if (ev.source === window && ev.data === 'browserify-tick') {
+                ev.stopPropagation();
+                if (queue.length > 0) {
+                    var fn = queue.shift();
+                    fn();
+                }
+            }
+        }, true);
+    }
+    
+    return function (fn) {
+        if (canPost) {
+            queue.push(fn);
+            window.postMessage('browserify-tick', '*');
+        }
+        else setTimeout(fn, 0);
+    };
+})();
+
+process.title = 'browser';
+process.browser = true;
+process.env = {};
+process.argv = [];
+
+process.binding = function (name) {
+    if (name === 'evals') return (require)('vm')
+    else throw new Error('No such module. (Possibly not yet loaded)')
+};
+
+(function () {
+    var cwd = '/';
+    var path;
+    process.cwd = function () { return cwd };
+    process.chdir = function (dir) {
+        if (!path) path = require('path');
+        cwd = path.resolve(dir, cwd);
+    };
+})();
 });
 
-require.define("/node_modules/dnode-protocol/index.js", function (require, module, exports, __dirname, __filename) {
-var Traverse = require('traverse');
+require.define("/node_modules/dnode-protocol/package.json",function(require,module,exports,__dirname,__filename,process){module.exports = {"main":"./index.js"}});
+
+require.define("/node_modules/dnode-protocol/index.js",function(require,module,exports,__dirname,__filename,process){var Traverse = require('traverse');
 var EventEmitter = require('events').EventEmitter;
 var stream = process.title === 'browser' ? {} : require('stream');
 var json = typeof JSON === 'object' ? JSON : require('jsonify');
 
 var exports = module.exports = function (wrapper) {
     var self = {};
-
+    
     self.sessions = {};
-
+    
     self.create = function () {
         var id = null;
         do {
@@ -362,34 +383,34 @@ var exports = module.exports = function (wrapper) {
                 Math.random() * Math.pow(2,32)
             ).toString(16);
         } while (self.sessions[id]);
-
+        
         var s = Session(id, wrapper);
         self.sessions[id] = s;
         return s;
     };
-
+    
     self.destroy = function (id) {
         delete self.sessions[id];
     };
-
+    
     return self;
 };
 
 var Session = exports.Session = function (id, wrapper) {
     var self = new EventEmitter;
-
+    
     self.id = id;
     self.remote = {};
-
+    
     var instance = self.instance =
         typeof(wrapper) == 'function'
             ? new wrapper(self.remote, self)
             : wrapper || {}
     ;
-
+    
     self.localStore = new Store;
     self.remoteStore = new Store;
-
+    
     self.localStore.on('cull', function (id) {
         self.emit('request', {
             method : 'cull',
@@ -397,16 +418,16 @@ var Session = exports.Session = function (id, wrapper) {
             callbacks : {}
         });
     });
-
+    
     var scrubber = new Scrubber(self.localStore);
-
+    
     self.start = function () {
         self.request('methods', [ instance ]);
     };
-
+    
     self.request = function (method, args) {
         var scrub = scrubber.scrub(args);
-
+        
         self.emit('request', {
             method : method,
             arguments : scrub.arguments,
@@ -414,7 +435,7 @@ var Session = exports.Session = function (id, wrapper) {
             links : scrub.links
         });
     };
-
+    
     self.parse = function (line) {
         var msg = null;
         try { msg = json.parse(line) }
@@ -424,11 +445,11 @@ var Session = exports.Session = function (id, wrapper) {
             );
             return;
         }
-
+        
         try { self.handle(msg) }
         catch (err) { self.emit('error', err) }
     };
-
+    
     self.handle = function (req) {
         var args = scrubber.unscrub(req, function (id) {
             if (!self.remoteStore.has(id)) {
@@ -440,7 +461,7 @@ var Session = exports.Session = function (id, wrapper) {
             }
             return self.remoteStore.get(id);
         });
-
+        
         if (req.method === 'methods') {
             handleMethods(args[0]);
         }
@@ -467,30 +488,30 @@ var Session = exports.Session = function (id, wrapper) {
             apply(self.localStore.get(req.method), self.instance, args);
         }
     }
-
+    
     function handleMethods (methods) {
         if (typeof methods != 'object') {
             methods = {};
         }
-
+        
         // copy since assignment discards the previous refs
         Object.keys(self.remote).forEach(function (key) {
             delete self.remote[key];
         });
-
+        
         Object.keys(methods).forEach(function (key) {
             self.remote[key] = methods[key];
         });
-
+        
         self.emit('remote', self.remote);
         self.emit('ready');
     }
-
+    
     function apply(f, obj, args) {
         try { f.apply(obj, args) }
         catch (err) { self.emit('error', err) }
     }
-
+    
     return self;
 };
 
@@ -499,12 +520,12 @@ var Scrubber = exports.Scrubber = function (store) {
     var self = {};
     store = store || new Store;
     self.callbacks = store.items;
-
+    
     // Take the functions out and note them for future use
     self.scrub = function (obj) {
         var paths = {};
         var links = [];
-
+        
         var args = Traverse(obj).map(function (node) {
             if (typeof(node) == 'function') {
                 var i = store.indexOf(node);
@@ -518,7 +539,7 @@ var Scrubber = exports.Scrubber = function (store) {
                     var id = store.add(node);
                     paths[id] = this.path;
                 }
-
+                
                 this.update('[Function]');
             }
             else if (this.circular) {
@@ -526,14 +547,14 @@ var Scrubber = exports.Scrubber = function (store) {
                 this.update('[Circular]');
             }
         });
-
+        
         return {
             arguments : args,
             callbacks : paths,
             links : links
         };
     };
-
+    
     // Replace callbacks. The supplied function should take a callback id and
     // return a callback of its own.
     self.unscrub = function (msg, f) {
@@ -543,15 +564,15 @@ var Scrubber = exports.Scrubber = function (store) {
             var path = msg.callbacks[id];
             args = setAt(args, path, f(id));
         });
-
+        
         (msg.links || []).forEach(function (link) {
             var value = getAt(args, link.from);
             args = setAt(args, link.to, value);
         });
-
+        
         return args;
     };
-
+    
     function setAt (ref, path, value) {
         var node = ref;
         for (var i = 0; i < path.length - 1; i++) {
@@ -570,7 +591,7 @@ var Scrubber = exports.Scrubber = function (store) {
             return ref;
         }
     }
-
+    
     function getAt (node, path) {
         for (var i = 0; i < path.length; i++) {
             var key = path[i];
@@ -581,29 +602,29 @@ var Scrubber = exports.Scrubber = function (store) {
         }
         return node;
     }
-
+    
     return self;
 }
 
 var Store = exports.Store = function() {
     var self = new EventEmitter;
     var items = self.items = [];
-
+    
     self.has = function (id) {
         return items[id] != undefined;
     };
-
+    
     self.get = function (id) {
         if (!self.has(id)) return null;
         return wrap(items[id]);
     };
-
+    
     self.add = function (fn, id) {
         if (id == undefined) id = items.length;
         items[id] = fn;
         return id;
     };
-
+    
     self.cull = function (arg) {
         if (typeof arg == 'function') {
             arg = items.indexOf(arg);
@@ -611,18 +632,18 @@ var Store = exports.Store = function() {
         delete items[arg];
         return arg;
     };
-
+    
     self.indexOf = function (fn) {
         return items.indexOf(fn);
     };
-
+    
     function wrap (fn) {
         return function() {
             fn.apply(this, arguments);
             autoCull(fn);
         };
     }
-
+    
     function autoCull (fn) {
         if (typeof fn.times == 'number') {
             fn.times--;
@@ -632,13 +653,13 @@ var Store = exports.Store = function() {
             }
         }
     }
-
+    
     return self;
 };
 
 var parseArgs = exports.parseArgs = function (argv) {
     var params = {};
-
+    
     [].slice.call(argv).forEach(function (arg) {
         if (typeof arg === 'string') {
             if (arg.match(/^\d+$/)) {
@@ -680,18 +701,14 @@ var parseArgs = exports.parseArgs = function (argv) {
                 + typeof arg + ' objects');
         }
     });
-
+    
     return params;
 };
-
 });
 
-require.define("/node_modules/dnode-protocol/node_modules/traverse/package.json", function (require, module, exports, __dirname, __filename) {
-module.exports = {"main":"./index"}
-});
+require.define("/node_modules/dnode-protocol/node_modules/traverse/package.json",function(require,module,exports,__dirname,__filename,process){module.exports = {"main":"./index"}});
 
-require.define("/node_modules/dnode-protocol/node_modules/traverse/index.js", function (require, module, exports, __dirname, __filename) {
-module.exports = Traverse;
+require.define("/node_modules/dnode-protocol/node_modules/traverse/index.js",function(require,module,exports,__dirname,__filename,process){module.exports = Traverse;
 function Traverse (obj) {
     if (!(this instanceof Traverse)) return new Traverse(obj);
     this.value = obj;
@@ -744,7 +761,7 @@ Traverse.prototype.reduce = function (cb, init) {
 Traverse.prototype.paths = function () {
     var acc = [];
     this.forEach(function (x) {
-        acc.push(this.path);
+        acc.push(this.path); 
     });
     return acc;
 };
@@ -759,24 +776,24 @@ Traverse.prototype.nodes = function () {
 
 Traverse.prototype.clone = function () {
     var parents = [], nodes = [];
-
+    
     return (function clone (src) {
         for (var i = 0; i < parents.length; i++) {
             if (parents[i] === src) {
                 return nodes[i];
             }
         }
-
+        
         if (typeof src === 'object' && src !== null) {
             var dst = copy(src);
-
+            
             parents.push(src);
             nodes.push(dst);
-
+            
             forEach(Object_keys(src), function (key) {
                 dst[key] = clone(src[key]);
             });
-
+            
             parents.pop();
             nodes.pop();
             return dst;
@@ -791,13 +808,13 @@ function walk (root, cb, immutable) {
     var path = [];
     var parents = [];
     var alive = true;
-
+    
     return (function walker (node_) {
         var node = immutable ? copy(node_) : node_;
         var modifiers = {};
-
+        
         var keepGoing = true;
-
+        
         var state = {
             node : node,
             node_ : node_,
@@ -836,14 +853,14 @@ function walk (root, cb, immutable) {
             stop : function () { alive = false },
             block : function () { keepGoing = false }
         };
-
+        
         if (!alive) return state;
-
+        
         if (typeof node === 'object' && node !== null) {
             state.keys = Object_keys(node);
-
+            
             state.isLeaf = state.keys.length == 0;
-
+            
             for (var i = 0; i < parents.length; i++) {
                 if (parents[i].node_ === node_) {
                     state.circular = parents[i];
@@ -854,44 +871,44 @@ function walk (root, cb, immutable) {
         else {
             state.isLeaf = true;
         }
-
+        
         state.notLeaf = !state.isLeaf;
         state.notRoot = !state.isRoot;
-
+        
         // use return values to update if defined
         var ret = cb.call(state, state.node);
         if (ret !== undefined && state.update) state.update(ret);
-
+        
         if (modifiers.before) modifiers.before.call(state, state.node);
-
+        
         if (!keepGoing) return state;
-
+        
         if (typeof state.node == 'object'
         && state.node !== null && !state.circular) {
             parents.push(state);
-
+            
             forEach(state.keys, function (key, i) {
                 path.push(key);
-
+                
                 if (modifiers.pre) modifiers.pre.call(state, state.node[key], key);
-
+                
                 var child = walker(state.node[key]);
                 if (immutable && Object.hasOwnProperty.call(state.node, key)) {
                     state.node[key] = child.node;
                 }
-
+                
                 child.isLast = i == state.keys.length - 1;
                 child.isFirst = i == 0;
-
+                
                 if (modifiers.post) modifiers.post.call(state, child);
-
+                
                 path.pop();
             });
             parents.pop();
         }
-
+        
         if (modifiers.after) modifiers.after.call(state, state.node);
-
+        
         return state;
     })(root).node;
 }
@@ -899,7 +916,7 @@ function walk (root, cb, immutable) {
 function copy (src) {
     if (typeof src === 'object' && src !== null) {
         var dst;
-
+        
         if (Array_isArray(src)) {
             dst = [];
         }
@@ -925,7 +942,7 @@ function copy (src) {
             dst = new T;
             if (!dst.__proto__) dst.__proto__ = proto;
         }
-
+        
         forEach(Object_keys(src), function (key) {
             dst[key] = src[key];
         });
@@ -958,17 +975,15 @@ forEach(Object_keys(Traverse.prototype), function (key) {
         return t[key].apply(t, args);
     };
 });
-
 });
 
-require.define("events", function (require, module, exports, __dirname, __filename) {
-if (!process.EventEmitter) process.EventEmitter = function () {};
+require.define("events",function(require,module,exports,__dirname,__filename,process){if (!process.EventEmitter) process.EventEmitter = function () {};
 
 var EventEmitter = exports.EventEmitter = process.EventEmitter;
 var isArray = typeof Array.isArray === 'function'
     ? Array.isArray
     : function (xs) {
-        return Object.toString.call(xs) === '[object Array]'
+        return Object.prototype.toString.call(xs) === '[object Array]'
     }
 ;
 
@@ -1133,11 +1148,9 @@ EventEmitter.prototype.listeners = function(type) {
   }
   return this._events[type];
 };
-
 });
 
-require.define("stream", function (require, module, exports, __dirname, __filename) {
-var events = require('events');
+require.define("stream",function(require,module,exports,__dirname,__filename,process){var events = require('events');
 var util = require('util');
 
 function Stream() {
@@ -1256,11 +1269,9 @@ Stream.prototype.pipe = function(dest, options) {
   // Allow for unix-like usage: A.pipe(B).pipe(C)
   return dest;
 };
-
 });
 
-require.define("util", function (require, module, exports, __dirname, __filename) {
-var events = require('events');
+require.define("util",function(require,module,exports,__dirname,__filename,process){var events = require('events');
 
 exports.print = function () {};
 exports.puts = function () {};
@@ -1572,21 +1583,15 @@ exports.inherits = function(ctor, superCtor) {
     }
   });
 };
-
 });
 
-require.define("/node_modules/dnode-protocol/node_modules/jsonify/package.json", function (require, module, exports, __dirname, __filename) {
-module.exports = {"main":"index.js"}
-});
+require.define("/node_modules/dnode-protocol/node_modules/jsonify/package.json",function(require,module,exports,__dirname,__filename,process){module.exports = {"main":"index.js"}});
 
-require.define("/node_modules/dnode-protocol/node_modules/jsonify/index.js", function (require, module, exports, __dirname, __filename) {
-exports.parse = require('./lib/parse');
+require.define("/node_modules/dnode-protocol/node_modules/jsonify/index.js",function(require,module,exports,__dirname,__filename,process){exports.parse = require('./lib/parse');
 exports.stringify = require('./lib/stringify');
-
 });
 
-require.define("/node_modules/dnode-protocol/node_modules/jsonify/lib/parse.js", function (require, module, exports, __dirname, __filename) {
-var at, // The index of the current character
+require.define("/node_modules/dnode-protocol/node_modules/jsonify/lib/parse.js",function(require,module,exports,__dirname,__filename,process){var at, // The index of the current character
     ch, // The current character
     escapee = {
         '"':  '"',
@@ -1609,26 +1614,26 @@ var at, // The index of the current character
             text:    text
         };
     },
-
+    
     next = function (c) {
         // If a c parameter is provided, verify that it matches the current character.
         if (c && c !== ch) {
             error("Expected '" + c + "' instead of '" + ch + "'");
         }
-
+        
         // Get the next character. When there are no more characters,
         // return the empty string.
-
+        
         ch = text.charAt(at);
         at += 1;
         return ch;
     },
-
+    
     number = function () {
         // Parse a number value.
         var number,
             string = '';
-
+        
         if (ch === '-') {
             string = '-';
             next('-');
@@ -1662,14 +1667,14 @@ var at, // The index of the current character
             return number;
         }
     },
-
+    
     string = function () {
         // Parse a string value.
         var hex,
             i,
             string = '',
             uffff;
-
+        
         // When parsing for string values, we must look for " and \ characters.
         if (ch === '"') {
             while (next()) {
@@ -1826,7 +1831,7 @@ value = function () {
 
 module.exports = function (source, reviver) {
     var result;
-
+    
     text = source;
     at = 0;
     ch = ' ';
@@ -1859,11 +1864,9 @@ module.exports = function (source, reviver) {
         return reviver.call(holder, key, value);
     }({'': result}, '')) : result;
 };
-
 });
 
-require.define("/node_modules/dnode-protocol/node_modules/jsonify/lib/stringify.js", function (require, module, exports, __dirname, __filename) {
-var cx = /[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
+require.define("/node_modules/dnode-protocol/node_modules/jsonify/lib/stringify.js",function(require,module,exports,__dirname,__filename,process){var cx = /[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
     escapable = /[\\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,
     gap,
     indent,
@@ -1883,7 +1886,7 @@ function quote(string) {
     // backslash characters, then we can safely slap some quotes around it.
     // Otherwise we must also replace the offending characters with safe escape
     // sequences.
-
+    
     escapable.lastIndex = 0;
     return escapable.test(string) ? '"' + string.replace(escapable, function (a) {
         var c = meta[a];
@@ -1901,47 +1904,47 @@ function str(key, holder) {
         mind = gap,
         partial,
         value = holder[key];
-
+    
     // If the value has a toJSON method, call it to obtain a replacement value.
     if (value && typeof value === 'object' &&
             typeof value.toJSON === 'function') {
         value = value.toJSON(key);
     }
-
+    
     // If we were called with a replacer function, then call the replacer to
     // obtain a replacement value.
     if (typeof rep === 'function') {
         value = rep.call(holder, key, value);
     }
-
+    
     // What happens next depends on the value's type.
     switch (typeof value) {
         case 'string':
             return quote(value);
-
+        
         case 'number':
             // JSON numbers must be finite. Encode non-finite numbers as null.
             return isFinite(value) ? String(value) : 'null';
-
+        
         case 'boolean':
         case 'null':
             // If the value is a boolean or null, convert it to a string. Note:
             // typeof null does not produce 'null'. The case is included here in
             // the remote chance that this gets fixed someday.
             return String(value);
-
+            
         case 'object':
             if (!value) return 'null';
             gap += indent;
             partial = [];
-
+            
             // Array.isArray
             if (Object.prototype.toString.apply(value) === '[object Array]') {
                 length = value.length;
                 for (i = 0; i < length; i += 1) {
                     partial[i] = str(i, value) || 'null';
                 }
-
+                
                 // Join all of the elements together, separated with commas, and
                 // wrap them in brackets.
                 v = partial.length === 0 ? '[]' : gap ?
@@ -1950,7 +1953,7 @@ function str(key, holder) {
                 gap = mind;
                 return v;
             }
-
+            
             // If the replacer is an array, use it to select the members to be
             // stringified.
             if (rep && typeof rep === 'object') {
@@ -1976,7 +1979,7 @@ function str(key, holder) {
                     }
                 }
             }
-
+            
         // Join all of the member texts together, separated with commas,
         // and wrap them in braces.
 
@@ -1992,7 +1995,7 @@ module.exports = function (value, replacer, space) {
     var i;
     gap = '';
     indent = '';
-
+    
     // If the space parameter is a number, make an indent string containing that
     // many spaces.
     if (typeof space === 'number') {
@@ -2012,18 +2015,17 @@ module.exports = function (value, replacer, space) {
     && (typeof replacer !== 'object' || typeof replacer.length !== 'number')) {
         throw new Error('JSON.stringify');
     }
-
+    
     // Make a fake root object containing our value under the key of ''.
     // Return the result of stringifying the value.
     return str('', {'': value});
 };
-
 });
 
-require.define("/shim.coffee", function (require, module, exports, __dirname, __filename) {
-    (function() {
-  var controlPage, descend, fnwrap, mkweb, mkwrap, pageWrap, port, proto, s, server, webpage, _phantom;
-  var __slice = Array.prototype.slice, __hasProp = Object.prototype.hasOwnProperty;
+require.define("/shim.coffee",function(require,module,exports,__dirname,__filename,process){(function() {
+  var controlPage, descend, fnwrap, mkweb, mkwrap, pageWrap, port, proto, s, server, webpage, _phantom,
+    __slice = [].slice,
+    __hasProp = {}.hasOwnProperty;
 
   mkweb = new Function("exports", "window", phantom.loadModuleSource('webpage'));
 
@@ -2050,18 +2052,28 @@ require.define("/shim.coffee", function (require, module, exports, __dirname, __
     while (keys.length > 1) {
       cur = cur[keys.shift()];
     }
-    if (op === 'set') cur[keys[0]] = val;
+    if (op === 'set') {
+      cur[keys[0]] = val;
+    }
     return cur[keys[0]];
   };
 
   mkwrap = function(src, pass, special) {
     var k, obj, _fn, _i, _len;
-    if (pass == null) pass = [];
-    if (special == null) special = {};
+    if (pass == null) {
+      pass = [];
+    }
+    if (special == null) {
+      special = {};
+    }
     obj = {
       set: function(key, val, cb) {
-        if (cb == null) cb = function() {};
-        if (typeof val === "function") val = fnwrap(val);
+        if (cb == null) {
+          cb = function() {};
+        }
+        if (typeof val === "function") {
+          val = fnwrap(val);
+        }
         return cb(descend('set', src, key, val));
       },
       get: function(key, cb) {
@@ -2070,11 +2082,13 @@ require.define("/shim.coffee", function (require, module, exports, __dirname, __
     };
     _fn = function(k) {
       return obj[k] = function() {
-        var arg, args, i, _len2;
+        var arg, args, i, _j, _len1;
         args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
-        for (i = 0, _len2 = args.length; i < _len2; i++) {
+        for (i = _j = 0, _len1 = args.length; _j < _len1; i = ++_j) {
           arg = args[i];
-          if (typeof arg === 'function') args[i] = fnwrap(arg);
+          if (typeof arg === 'function') {
+            args[i] = fnwrap(arg);
+          }
         }
         return src[k].apply(src, args);
       };
@@ -2093,17 +2107,28 @@ require.define("/shim.coffee", function (require, module, exports, __dirname, __
   pageWrap = function(page) {
     return mkwrap(page, ['open', 'includeJs', 'sendEvent', 'release', 'uploadFile'], {
       injectJs: function(js, cb) {
-        if (cb == null) cb = function() {};
+        if (cb == null) {
+          cb = function() {};
+        }
         return cb(page.injectJs(js));
       },
       evaluate: function() {
-        var args, cb, fn;
-        fn = arguments[0], cb = arguments[1], args = 3 <= arguments.length ? __slice.call(arguments, 2) : [];
-        if (cb == null) cb = function() {};
-        return cb(page.evaluate.apply(page, [fn].concat(args)));
+        var args, cb, fargs, fn, _i;
+        args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+        fn = args[0], fargs = 3 <= args.length ? __slice.call(args, 1, _i = args.length - 1) : (_i = 1, []), cb = args[_i++];
+        if ((cb != null) && (typeof cb) !== 'function') {
+          fargs.push(cb);
+          cb = void 0;
+        }
+        if (cb == null) {
+          cb = (function() {});
+        }
+        return cb(page.evaluate.apply(page, [fn].concat(fargs)));
       },
       render: function(file, cb) {
-        if (cb == null) cb = function() {};
+        if (cb == null) {
+          cb = function() {};
+        }
         page.render(file);
         return cb();
       }
@@ -2112,7 +2137,9 @@ require.define("/shim.coffee", function (require, module, exports, __dirname, __
 
   _phantom = mkwrap(phantom, ['exit'], {
     injectJs: function(js, cb) {
-      if (cb == null) cb = function() {};
+      if (cb == null) {
+        cb = function() {};
+      }
       return cb(phantom.injectJs(js));
     },
     createPage: function(cb) {
@@ -2126,14 +2153,14 @@ require.define("/shim.coffee", function (require, module, exports, __dirname, __
 
   s.on('request', function(req) {
     var evil;
-    //console.log("phantom sending request " + (JSON.stringify(req)));
     evil = "function(){socket.emit('message', " + (JSON.stringify(JSON.stringify(req))) + " + '\\n');}";
     return controlPage.evaluate(evil);
   });
 
   controlPage.onAlert = function(msg) {
-    if (msg.slice(0, 6) !== "PCTRL ") return;
-    //console.log("phantom got request " + msg.slice(6));
+    if (msg.slice(0, 6) !== "PCTRL ") {
+      return;
+    }
     return s.parse(msg.slice(6));
   };
 
@@ -2144,13 +2171,10 @@ require.define("/shim.coffee", function (require, module, exports, __dirname, __
   };
 
   controlPage.open("http://127.0.0.1:" + port + "/", function(status) {
-    /*console.log('Control page title is ' + controlPage.evaluate(function() {
-      return document.title;
-    }));*/
     return s.start();
   });
 
 }).call(this);
-
 });
 require("/shim.coffee");
+})();

@@ -22,9 +22,9 @@ wrap = (ph) ->
   ph.createPage = (cb) ->
     ph._createPage (page) ->
       page._evaluate = page.evaluate
-      page.evaluate = (fn, cb, args...) -> page._evaluate.apply(page, [fn.toString(), cb].concat(args))
+      page.evaluate = (fn, args...) -> 
+        page._evaluate.apply page, [fn.toString(), args...]
       cb page
-
 
 
 module.exports =

@@ -49,7 +49,13 @@ mkwrap = (src, pass=[], special={}) ->
 pageWrap = (page) -> mkwrap page,
   ['open','includeJs','sendEvent','release','uploadFile']
   injectJs: (js, cb=->) -> cb page.injectJs js
-  evaluate: (fn, cb=(->) ,args...) -> cb page.evaluate.call(page, [fn].concat(args))
+  evaluate: (args...) -> 
+    [fn, fargs..., cb] = args
+    if cb? and (typeof cb) isnt 'function'
+      fargs.push cb
+      cb = undefined
+    cb = (->) unless cb?      
+    cb page.evaluate.apply page, [fn].concat(fargs)
   render: (file, cb=->) -> page.render file; cb()
 
 _phantom = mkwrap phantom,
