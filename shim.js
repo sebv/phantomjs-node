@@ -2113,17 +2113,16 @@ require.define("/shim.coffee",function(require,module,exports,__dirname,__filena
         return cb(page.injectJs(js));
       },
       evaluate: function() {
-        var args, cb, fargs, fn, _i;
-        args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
-        fn = args[0], fargs = 3 <= args.length ? __slice.call(args, 1, _i = args.length - 1) : (_i = 1, []), cb = args[_i++];
+        var args, cb, fn, _i;
+        fn = arguments[0], args = 3 <= arguments.length ? __slice.call(arguments, 1, _i = arguments.length - 1) : (_i = 1, []), cb = arguments[_i++];
         if ((cb != null) && (typeof cb) !== 'function') {
-          fargs.push(cb);
+          args.push(cb);
           cb = void 0;
         }
         if (cb == null) {
           cb = (function() {});
         }
-        return cb(page.evaluate.apply(page, [fn].concat(fargs)));
+        return cb(page.evaluate.apply(page, [fn].concat(args)));
       },
       render: function(file, cb) {
         if (cb == null) {
