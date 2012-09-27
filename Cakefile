@@ -16,7 +16,9 @@ run = (cmds...) ->
 task "build", "coffee-compile and browserify phantom", ->
   run(
     "#{bin}/coffee -c phantom.coffee"
+    "#{bin}/coffee -cb shim_head.coffee"
     "rm -f shim.js"
-    "#{bin}/browserify shim.coffee -o shim.js"
+    "#{bin}/browserify shim.coffee -o shim_br.js"
+    "cat shim_head.js shim_br.js > shim.js"
   )
 task "test", "run phantom's unit tests", -> run "#{bin}/vows --spec test/*.coffee"

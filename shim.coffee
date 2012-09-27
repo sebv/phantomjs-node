@@ -1,8 +1,4 @@
-
-# Require gets overwritten by browserify, so we have to reimplement it from scratch - boo :(
-mkweb = new Function "exports", "window", phantom.loadModuleSource('webpage')
-webpage = {}
-mkweb.call {}, webpage, {}
+# webpage is declared in shim_head
 
 proto = require 'dnode-protocol'
 
@@ -56,6 +52,7 @@ pageWrap = (page) -> mkwrap page,
     cb = (->) unless cb?      
     cb page.evaluate.apply page, [fn].concat(args)
   render: (file, cb=->) -> page.render file; cb()
+  renderBase64: (fmt, cb=->) -> cb page.renderBase64 fmt
 
 _phantom = mkwrap phantom,
   ['exit'],
