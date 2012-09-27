@@ -4,11 +4,19 @@ child   = require 'child_process'
 
 phanta = []
 startPhantomProcess = (port, args) ->
-  ps = child.spawn 'phantomjs', args.concat [__dirname+'/shim.js', port]
+  ps = child.spawn 'phantomjs', args.concat [
+    # '-g' 
+    # 'ApplePersistence' 
+    # '-bool' 
+    # 'no'
+    __dirname+'/shim.js'
+    port
+  ]
 
   ps.stdout.on 'data', (data) -> console.log "phantom stdout: #{data}"
   ps.stderr.on 'data', (data) ->
-    return if data.toString('utf8').match /No such method.*socketSentData/ #Stupid, stupid QTWebKit
+    return if data.toString('utf8').match /No such method.*socketSentData/          
+    return if data.toString('utf8').match /ApplePersistence=YES/ 
     console.warn "phantom stderr: #{data}"
   ps
 

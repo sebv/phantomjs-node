@@ -21,6 +21,9 @@
       if (data.toString('utf8').match(/No such method.*socketSentData/)) {
         return;
       }
+      if (data.toString('utf8').match(/ApplePersistence=YES/)) {
+        return;
+      }
       return console.warn("phantom stderr: " + data);
     });
     return ps;
