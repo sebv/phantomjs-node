@@ -17,7 +17,7 @@ task "build", "coffee-compile and browserify phantom", ->
   run(
     "#{bin}/coffee -c phantom.coffee"
     "#{bin}/coffee -cb shim_head.coffee"
-    "rm -f shim.js"
+    "rm -f shim.js shim_br.js"
     "#{bin}/browserify shim.coffee -o shim_br.js"
     "cat shim_head.js shim_br.js > shim.js"
   )
